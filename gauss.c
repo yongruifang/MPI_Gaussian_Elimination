@@ -33,12 +33,14 @@ int main(int argc, char* argv[]) {
         x = (double*)malloc(sizeof(double)*N); 
         for (i = 0; i < N; i++) {
             x[i] = (double)rand() / RAND_MAX;
-            M[i*COL + N] = 0.0;
-            for (j = 0; j < N; j++) {
+            for (j = 0; j < N; j ++) {
                 M[i*COL+j] = (double)rand() / RAND_MAX;
-                M[i*COL+N] += M[i*COL+j] * x[i];
             }
+            M[i*COL+N] = 0.0;
         }
+        for (i = 0; i < N; i ++)
+            for(j = 0; j < N; j ++) 
+                    M[i*COL+N] += M[i*COL+j] * x[j];
         copyMemory(M,M_remake); // 复制矩阵，使得同个进程中需要的内存是连续的
     }
     int bsize = N*COL/numproc;
@@ -61,8 +63,8 @@ int main(int argc, char* argv[]) {
         for(int row = 0; row < N/numproc; row++){ //逐行找主元
             int gRow = row*numproc + rank; // gRow是全局行号 
             if(rmap[gRow] < 0){ //第J行的主元为空
-                if(fabs(M_buffer[row*COL+i]) > local_pivot_val){
-                    local_pivot_val = fabs(M_buffer[row*COL+i]);
+                if(M_buffer[row*COL+i] > local_pivot_val){
+                    local_pivot_val = M_buffer[row*COL+i];
                     local_pivot_idx = row;
                 }                
             }
