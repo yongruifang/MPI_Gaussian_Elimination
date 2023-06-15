@@ -118,10 +118,24 @@ int main(int argc, char* argv[]) {
         for (i = 0; i < N; i++) {
             int row = cmap[i]; 
             int index = row % numproc*(N/numproc) + row / numproc; // 该行在全局矩阵中的位置
-            for (j = 0; j < N; j ++) {
-                printf("%f ", M[index*COL+j]);
+            for (j = 0; j < N+1; j ++) {
+                printf("%.2f ", M[index*COL+j]);
             }
             printf("\n");
+        }
+        // Perform back substitution 回代，求解x
+        for (i = N-1; i >= 0; i --) {//自下而上
+            int row = cmap[i]; 
+            int index = row % numproc*(N/numproc) + row / numproc; // 该行在全局矩阵中的位置
+            double sum = 0.0;
+            for (j = i+1; j < N; j ++) {
+                sum += M[index*COL+j] * x[j];
+            }
+            x[i] = (M[index*COL+N] - sum) / M[index*COL+i];
+        }
+        // Print the solution
+        for (j = 0; j < N; j ++) {
+            printf("%.2f ", x[j]);
         }
     }
     if(rank==0){
