@@ -6,10 +6,12 @@
 #define COL 1001
 // 复制矩阵，使得同个进程中需要的内存是连续的
 int rank, numproc;
+//剩余行数
+int remainRows;
 void copyMemory(const double *M, double *M_remake)
 {
     int unit = N/numproc; // 每个进程需要的行数
-    for(int i = 0; i < N; i++){
+    for(int i = 0; i < N-remainRows; i++){
         int proc = i%numproc; //属于哪个进程的管辖
         int offset = i/numproc; // 在该进程中的行偏移量
         int row = proc*unit + offset;
@@ -17,6 +19,11 @@ void copyMemory(const double *M, double *M_remake)
             M_remake[row*COL+j] = M[i*COL+j];
         }        
     }   
+    for(int i = N-remainRows; i < N; i ++){
+        for(int j = 0; j <= N; j++){
+            M_remake[i*COL+j] = M[i*COL+j];
+        }
+    }
 }
 int main(int argc, char* argv[]) {
     int i,j;
@@ -25,9 +32,13 @@ int main(int argc, char* argv[]) {
     t1 = MPI_Wtime();
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numproc);
+    remainRows = N % numproc;
     // 线性方程组 Ax = b , A和b合并成增广矩阵M
     double *M, *M_remake, *x; // x是解向量
     double *M_buffer; // 每个进程需要的矩阵M的一部分
+    // 计算每个进程接收数据的偏移量
+    int* recv_counts = (int*)malloc(numproc * sizeof(int)); // 每个进程接收的数据量
+    int* recv_displs = (int*)malloc(numproc * sizeof(int)); // 每个进程接收的数据的偏移量
     if(rank == 0){
         // 为了保证有解，先生成解向量，b的值由随机矩阵A和x计算得到
         M = (double*)malloc(sizeof(double)*N*COL);
@@ -44,10 +55,22 @@ int main(int argc, char* argv[]) {
             for(j = 0; j < N; j ++) 
                     M[i*COL+N] += M[i*COL+j] * x[j];
         copyMemory(M,M_remake); // 复制矩阵，使得同个进程中需要的内存是连续的
+        recv_counts[0] = N/numproc*COL ;
+        recv_displs[0] = 0;
+        for (i = 1; i < numproc-1; i ++){
+            recv_counts[i] = N/numproc*COL;
+            recv_displs[i] = recv_displs[i-1] + recv_counts[i-1]; 
+        }
+        recv_counts[numproc-1] = (N/numproc+remainRows)*COL;
+        recv_displs[numproc-1] = recv_displs[numproc-2] + recv_counts[numproc-2];
     }
-    int bsize = N*COL/numproc;
-    M_buffer = (double*)malloc(sizeof(double)*bsize);
-    MPI_Scatter(M_remake,N*COL/numproc,MPI_DOUBLE,M_buffer,bsize,MPI_DOUBLE,0,MPI_COMM_WORLD);
+    // 分发recv_counts数组和recv_displs数组
+    MPI_Bcast(recv_counts,numproc,MPI_INT,0,MPI_COMM_WORLD);
+    MPI_Bcast(recv_displs,numproc,MPI_INT,0,MPI_COMM_WORLD);
+    // 计算当前进程需要接收的数据量
+    int recv_size = (rank == numproc - 1) ? (N/numproc + remainRows) * COL : N/numproc* COL;
+    M_buffer = (double*)malloc(sizeof(double)*recv_size);
+    MPI_Scatterv(M_remake,recv_counts,recv_displs,MPI_DOUBLE,M_buffer,recv_size,MPI_DOUBLE,0,MPI_COMM_WORLD);
     // Perform Gaussian elimination with partial pivoting
     // 引入双向映射，另类实现行交换
     int *cmap = (int*)malloc(N*sizeof(int)); //cmap[i]=j 表示第i列的主元在第j行
@@ -71,6 +94,17 @@ int main(int argc, char* argv[]) {
                 }                
             }
         }
+        if(rank == numproc - 1){
+            for(int row = N/numproc; row < N/numproc + remainRows; row++){ //逐行找主元
+                int gRow = N-remainRows+(row-N/numproc); // gRow是全局行号 
+                if(rmap[gRow] < 0){ //第J行的主元为空
+                    if(M_buffer[row*COL+i] > local_pivot_val){ 
+                        local_pivot_val = M_buffer[row*COL+i];
+                        local_pivot_row = row;
+                    }                
+                }
+            }
+        }
         // Find the global pivot row with the maximum absolute value
         MPI_Allreduce(&local_pivot_val,&global_pivot_val,1,MPI_DOUBLE,MPI_MAX,MPI_COMM_WORLD);
         int local_pivot_proc = -1;// 记录主元所在的进程号
@@ -80,7 +114,8 @@ int main(int argc, char* argv[]) {
             for(j = 0 ; j < N+1; j ++){
                 temp_row[j] = M_buffer[local_pivot_row*COL+j]; // 保存该行
             }
-            global_pivot_row = local_pivot_row * numproc + rank; // 该行在全局矩阵中的位置
+            if(local_pivot_row < N/numproc) global_pivot_row = local_pivot_row * numproc + rank; // 该行在全局矩阵中的位置
+            else global_pivot_row = (N-remainRows) + (local_pivot_row-N/numproc);
         }
         int global_pivot_proc; // 因为有可能有多个进程的主元值相同，所以需要再次通信
         MPI_Allreduce(&local_pivot_proc, &global_pivot_proc, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD); // 取最大的进程号
@@ -97,10 +132,20 @@ int main(int argc, char* argv[]) {
                 }
             }
         }
+        if(rank == numproc - 1){
+            for(int row = N/numproc; row < N/numproc + remainRows; row ++){
+                if(rmap[(N-remainRows)+(row-N/numproc)]<0){ // 第row行的主元为空，需要消元
+                    double temp = M_buffer[row*COL+i] / temp_row[i]; // 计算消元系数
+                    for(j = i; j < N+1; j ++){ // 逐列消元
+                        M_buffer[row*COL+j] -= temp_row[j]*temp; // 消元
+                    }
+                }
+            }
+        }
     }
     // 收集矩阵
-    MPI_Gather(M_buffer,N*COL/numproc,MPI_DOUBLE,M,N*COL/numproc,MPI_DOUBLE,0,MPI_COMM_WORLD);
-    // 打印上三角矩阵
+    // recv_size复用做send_size, recv_counts复用做send_counts 
+    MPI_Gatherv(M_buffer,recv_size,MPI_DOUBLE,M,recv_counts,recv_displs,MPI_DOUBLE,0,MPI_COMM_WORLD);
     if(rank == 0){
         // 记录最后一行的映射
         for(i = 0 ; i < N; i ++){
@@ -138,9 +183,11 @@ int main(int argc, char* argv[]) {
         free(x);
         free(cmap);
         free(rmap);
+        free(recv_counts);
+        free(recv_displs);
     }
     t2 = MPI_Wtime();
-    printf("it takes %.2lfs\n",t2-t1);
+    if(rank == 0) printf("it takes %.2lfs\n",t2-t1);
     MPI_Finalize();
     return 0;
 }
