@@ -137,6 +137,17 @@ int main(int argc, char* argv[]) {
         for (j = 0; j < N; j ++) {
             printf("%.2f ", x[j]);
         }
+        // Max error
+        double max_error = 0.0;
+        for (i = 0; i < N; i ++) {
+            double sum = 0.0;
+            for (j = 0; j < N; j ++) {
+                sum += M[i*COL+j] * x[j];
+            }
+            double error = fabs(sum - M[i*COL+N]);
+            if (error > max_error) max_error = error;
+        }
+        printf("\nMax error: %lf\n", max_error);
     }
     if(rank==0){
         // 释放内存
