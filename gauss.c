@@ -2,8 +2,8 @@
 #include <stdlib.h>
 #include <mpi.h>
 #include <math.h>
-#define N 10 // Size of the matrix
-#define COL 11
+#define N 1000 // Size of the matrix
+#define COL 1001
 // 复制矩阵，使得同个进程中需要的内存是连续的
 int rank, numproc;
 void copyMemory(const double *M, double *M_remake)
@@ -20,7 +20,9 @@ void copyMemory(const double *M, double *M_remake)
 }
 int main(int argc, char* argv[]) {
     int i,j;
+    double t1 , t2;
     MPI_Init(&argc, &argv);
+    t1 = MPI_Wtime();
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &numproc);
     // 线性方程组 Ax = b , A和b合并成增广矩阵M
@@ -106,23 +108,6 @@ int main(int argc, char* argv[]) {
                 cmap[N-1] = i; // 记录最后一行的映射
             }
         }        
-        for(i = 0 ; i < N; i ++){
-            printf("%d ",cmap[i]);
-        }
-        printf("\n");
-        for(i = 0 ; i < N; i ++){
-            printf("%d ",rmap[i]);
-        }
-        printf("\n");
-        printf("Upper triangular matrix:\n");
-        for (i = 0; i < N; i++) {
-            int row = cmap[i]; 
-            int index = row % numproc*(N/numproc) + row / numproc; // 该行在全局矩阵中的位置
-            for (j = 0; j < N+1; j ++) {
-                printf("%.2f ", M[index*COL+j]);
-            }
-            printf("\n");
-        }
         // Perform back substitution 回代，求解x
         for (i = N-1; i >= 0; i --) {//自下而上
             int row = cmap[i]; 
@@ -132,10 +117,6 @@ int main(int argc, char* argv[]) {
                 sum += M[index*COL+j] * x[j];
             }
             x[i] = (M[index*COL+N] - sum) / M[index*COL+i];
-        }
-        // Print the solution
-        for (j = 0; j < N; j ++) {
-            printf("%.2f ", x[j]);
         }
         // Max error
         double max_error = 0.0;
@@ -158,6 +139,8 @@ int main(int argc, char* argv[]) {
         free(cmap);
         free(rmap);
     }
+    t2 = MPI_Wtime();
+    printf("it takes %.2lfs\n",t2-t1);
     MPI_Finalize();
     return 0;
 }
