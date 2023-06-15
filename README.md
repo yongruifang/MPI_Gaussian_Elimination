@@ -17,3 +17,16 @@ rmap[i]=j 指的是 第i行的主元列是i
 - 怎么并行寻找主元行
 # 算法改进
 经过改进，<kbd>行数%进程数!=0</kbd>也可以正常运行
+# 程序运行
+- 环境：Linux
+命令：
+```bash
+mpicc -O3 gauss.c -o gauss
+mpirun -np <进程数> ./gauss
+```
+- 环境：Windows
+命令：
+```bash
+gcc  -O3 gauss.c -o gauss.c -l msmpi -L "D:\Microsoft SDKs\MPI\Lib\x64" -I "D:\Microsoft SDKs\MPI\Include"
+mpiexec -np <进程数> ./gauss
+```
